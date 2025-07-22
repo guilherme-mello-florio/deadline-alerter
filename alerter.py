@@ -55,7 +55,9 @@ def send_email(recipient_email: str, subject: str, body: str):
 
 # --- MAIN LOGIC ---
 def check_deadlines_and_send_alerts():
-    """Queries for tasks with upcoming deadlines and sends alerts."""
+    """
+    Queries for tasks with upcoming deadlines and sends alerts to all responsible users.
+    """
     db = SessionLocal()
     try:
         today = date.today()
@@ -64,14 +66,13 @@ def check_deadlines_and_send_alerts():
 
         print(f"Checking for deadlines on: {today}, {one_day_away}, and {two_days_away}")
 
-        # Find tasks that are due in 2 days, 1 day, or today, are not completed, and have a user assigned.
+        # --- MODIFIED: The query now joins on the 'responsible_users' relationship ---
         tasks_to_alert = db.query(ProjectScheduleTask).options(
-            joinedload(ProjectScheduleTask.responsible_user),
+            joinedload(ProjectScheduleTask.responsible_users),
             joinedload(ProjectScheduleTask.project)
         ).filter(
             ProjectScheduleTask.end_date.in_([today, one_day_away, two_days_away]),
-            ProjectScheduleTask.status != 'Concluído', # Assumes 'Concluído' is the completed status
-            ProjectScheduleTask.responsible_user_id.isnot(None)
+            ProjectScheduleTask.status != 'Concluído'
         ).all()
 
         if not tasks_to_alert:
@@ -80,41 +81,48 @@ def check_deadlines_and_send_alerts():
 
         print(f"Found {len(tasks_to_alert)} tasks with upcoming deadlines.")
 
+        # --- MODIFIED: Loop through tasks, then through each responsible user ---
         for task in tasks_to_alert:
-            user = task.responsible_user
             project = task.project
             
-            # Determine the alert type
-            days_until_due = (task.end_date - today).days
-            if days_until_due == 0:
-                alert_type = "DUE TODAY"
-            elif days_until_due == 1:
-                alert_type = "Due Tomorrow"
-            else: # days_until_due == 2
-                alert_type = "Due in 2 Days"
+            # If a task has no one assigned, skip it.
+            if not task.responsible_users:
+                print(f"WARNING: Task '{task.task_name}' (ID: {task.id}) has no responsible users assigned. Skipping alert.")
+                continue
 
-            subject = f"Deadline Reminder [{alert_type}]: Task '{task.task_name}'"
-            body = f"""
-            <html>
-            <body>
-                <p>Hi {user.username},</p>
-                <p>This is a friendly reminder about an upcoming deadline for a task you are responsible for:</p>
-                <ul>
-                    <li><strong>Project:</strong> {project.project_name}</li>
-                    <li><strong>Task:</strong> {task.task_name}</li>
-                    <li><strong>Interface:</strong> {task.interface_name.replace('_', ' ')}</li>
-                    <li><strong>Due Date:</strong> {task.end_date.strftime('%A, %B %d, %Y')} ({alert_type})</li>
-                </ul>
-                <p>Please ensure it is completed on time.</p>
-                <p>Thanks,<br>Wysupp Validate System</p>
-            </body>
-            </html>
-            """
-            
-            if user.email:
-                send_email(user.email, subject, body)
-            else:
-                print(f"WARNING: User '{user.username}' has no email address. Cannot send alert for task ID {task.id}.")
+            # Loop through each assigned user and send them a personalized email.
+            for user in task.responsible_users:
+                # Determine the alert type
+                days_until_due = (task.end_date - today).days
+                if days_until_due == 0:
+                    alert_type = "DUE TODAY"
+                elif days_until_due == 1:
+                    alert_type = "Due Tomorrow"
+                else: # days_until_due == 2
+                    alert_type = "Due in 2 Days"
+
+                subject = f"Deadline Reminder [{alert_type}]: Task '{task.task_name}'"
+                body = f"""
+                <html>
+                <body>
+                    <p>Hi {user.username},</p>
+                    <p>This is a friendly reminder about an upcoming deadline for a task you are responsible for:</p>
+                    <ul>
+                        <li><strong>Project:</strong> {project.project_name}</li>
+                        <li><strong>Task:</strong> {task.task_name}</li>
+                        <li><strong>Interface:</strong> {task.interface_name.replace('_', ' ')}</li>
+                        <li><strong>Due Date:</strong> {task.end_date.strftime('%A, %B %d, %Y')} ({alert_type})</li>
+                    </ul>
+                    <p>Please ensure it is completed on time.</p>
+                    <p>Thanks,<br>Wysupp Validate System</p>
+                </body>
+                </html>
+                """
+                
+                if user.email:
+                    send_email(user.email, subject, body)
+                else:
+                    print(f"WARNING: User '{user.username}' has no email address. Cannot send alert for task ID {task.id}.")
 
     finally:
         db.close()

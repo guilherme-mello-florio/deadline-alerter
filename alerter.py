@@ -10,7 +10,8 @@ from sqlalchemy.orm import sessionmaker, joinedload
 from dotenv import load_dotenv
 
 # Import your models by copying models.py into the same directory
-from models import ProjectScheduleTask, User, Project
+# Make sure your models.py file is complete for this script to work
+from models import ProjectScheduleTask, User, Project, ProjectDrop 
 
 # --- CONFIGURATION ---
 load_dotenv()
@@ -45,7 +46,7 @@ def send_email(recipient_email: str, subject: str, body: str):
     try:
         print(f"Connecting to mail server {MAIL_SERVER}:{MAIL_PORT}...")
         with smtplib.SMTP(MAIL_SERVER, MAIL_PORT) as server:
-            server.starttls()  # Secure the connection
+            server.starttls()
             server.login(MAIL_USERNAME, MAIL_PASSWORD)
             server.send_message(msg)
             print(f"Successfully sent email to {recipient_email} with subject: '{subject}'")
@@ -56,7 +57,8 @@ def send_email(recipient_email: str, subject: str, body: str):
 # --- MAIN LOGIC ---
 def check_deadlines_and_send_alerts():
     """
-    Queries for tasks with upcoming deadlines and sends alerts to all responsible users.
+    Queries for tasks with upcoming deadlines, groups them by user, 
+    and sends one summary alert email to each user.
     """
     db = SessionLocal()
     try:
@@ -66,7 +68,6 @@ def check_deadlines_and_send_alerts():
 
         print(f"Checking for deadlines on: {today}, {one_day_away}, and {two_days_away}")
 
-        # --- MODIFIED: The query now joins on the 'responsible_users' relationship ---
         tasks_to_alert = db.query(ProjectScheduleTask).options(
             joinedload(ProjectScheduleTask.responsible_users),
             joinedload(ProjectScheduleTask.project)
@@ -81,48 +82,58 @@ def check_deadlines_and_send_alerts():
 
         print(f"Found {len(tasks_to_alert)} tasks with upcoming deadlines.")
 
-        # --- MODIFIED: Loop through tasks, then through each responsible user ---
+        # --- MODIFIED LOGIC: 1. Group tasks by responsible user ---
+        tasks_by_user = {}
         for task in tasks_to_alert:
-            project = task.project
+            for user in task.responsible_users:
+                if user.id not in tasks_by_user:
+                    tasks_by_user[user.id] = {'user_obj': user, 'tasks': []}
+                tasks_by_user[user.id]['tasks'].append(task)
+
+        # --- MODIFIED LOGIC: 2. Loop through users and send one summary email each ---
+        for user_id, data in tasks_by_user.items():
+            user = data['user_obj']
+            tasks = data['tasks']
             
-            # If a task has no one assigned, skip it.
-            if not task.responsible_users:
-                print(f"WARNING: Task '{task.task_name}' (ID: {task.id}) has no responsible users assigned. Skipping alert.")
+            if not user.email:
+                print(f"WARNING: User '{user.username}' has no email address. Cannot send alert.")
                 continue
 
-            # Loop through each assigned user and send them a personalized email.
-            for user in task.responsible_users:
-                # Determine the alert type
+            # Build the list of tasks for the email body
+            task_list_html = ""
+            for task in sorted(tasks, key=lambda t: t.end_date): # Sort tasks by due date
                 days_until_due = (task.end_date - today).days
                 if days_until_due == 0:
                     alert_type = "DUE TODAY"
                 elif days_until_due == 1:
                     alert_type = "Due Tomorrow"
-                else: # days_until_due == 2
+                else:
                     alert_type = "Due in 2 Days"
 
-                subject = f"Deadline Reminder [{alert_type}]: Task '{task.task_name}'"
-                body = f"""
-                <html>
-                <body>
-                    <p>Hi {user.username},</p>
-                    <p>This is a friendly reminder about an upcoming deadline for a task you are responsible for:</p>
-                    <ul>
-                        <li><strong>Project:</strong> {project.project_name}</li>
-                        <li><strong>Task:</strong> {task.task_name}</li>
-                        <li><strong>Interface:</strong> {task.interface_name.replace('_', ' ')}</li>
-                        <li><strong>Due Date:</strong> {task.end_date.strftime('%A, %B %d, %Y')} ({alert_type})</li>
-                    </ul>
-                    <p>Please ensure it is completed on time.</p>
-                    <p>Thanks,<br>Wysupp Validate System</p>
-                </body>
-                </html>
+                task_list_html += f"""
+                <li style="margin-bottom: 15px; padding: 10px; border-left: 4px solid #f59e0b; background-color: #fef9c3;">
+                    <strong>Project:</strong> {task.project.project_name}<br>
+                    <strong>Task:</strong> {task.task_name} (Interface: {task.interface_name.replace('_', ' ')})<br>
+                    <strong>Due Date:</strong> {task.end_date.strftime('%A, %B %d, %Y')} <strong style="color: #b45309;">({alert_type})</strong>
+                </li>
                 """
-                
-                if user.email:
-                    send_email(user.email, subject, body)
-                else:
-                    print(f"WARNING: User '{user.username}' has no email address. Cannot send alert for task ID {task.id}.")
+
+            subject = f"Deadline Reminder: You have {len(tasks)} tasks approaching their due dates"
+            body = f"""
+            <html>
+            <body style="font-family: sans-serif;">
+                <p>Hi {user.username},</p>
+                <p>This is a friendly reminder about the following tasks you are responsible for that are approaching their deadlines:</p>
+                <ul style="list-style: none; padding: 0;">
+                    {task_list_html}
+                </ul>
+                <p>Please ensure they are completed on time.</p>
+                <p>Thanks,<br>Wysupp Validate System</p>
+            </body>
+            </html>
+            """
+            
+            send_email(user.email, subject, body)
 
     finally:
         db.close()

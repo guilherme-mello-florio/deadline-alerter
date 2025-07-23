@@ -50,6 +50,13 @@ class ProjectScheduleTask(Base):
     responsible_users = relationship(
         "User",
         secondary=task_responsible_association,
+
+class ProjectDrop(Base):
+    __tablename__ = 'project_drops'
+    id = Column(Integer, primary_key=True)
+    
+    # This relationship is needed to satisfy the "back_populates"
+    tasks = relationship("ProjectScheduleTask", back_populates="drop")
         back_populates="responsible_tasks"
     )
 

@@ -32,6 +32,8 @@ class Project(Base):
     id = Column(Integer, primary_key=True)
     project_name = Column(String(45), unique=True)
 
+    schedule_tasks = relationship("ProjectScheduleTask", back_populates="project")
+
 # The primary model for querying deadlines
 class ProjectScheduleTask(Base):
     __tablename__ = 'project_schedule_tasks'

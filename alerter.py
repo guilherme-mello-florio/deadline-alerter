@@ -5,13 +5,12 @@ import smtplib
 from email.mime.text import MIMEText
 from datetime import date, timedelta
 
-from sqlalchemy import create_engine, and_
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, joinedload
 from dotenv import load_dotenv
 
-# Import your models by copying models.py into the same directory
-# Make sure your models.py file is complete for this script to work
-from models import ProjectScheduleTask, User, Project, ProjectDrop 
+# MODIFIED: Import ProjectInterfaceStatus as well
+from models import ProjectScheduleTask, User, Project, ProjectInterfaceStatus
 
 # --- CONFIGURATION ---
 load_dotenv()
@@ -58,7 +57,7 @@ def send_email(recipient_email: str, subject: str, body: str):
 def check_deadlines_and_send_alerts():
     """
     Queries for tasks with upcoming deadlines, groups them by user, 
-    and sends one summary alert email to each user.
+    and sends one summary alert email to each user with interface status.
     """
     db = SessionLocal()
     try:
@@ -68,6 +67,15 @@ def check_deadlines_and_send_alerts():
 
         print(f"Checking for deadlines on: {today}, {one_day_away}, and {two_days_away}")
 
+        # --- MODIFICATION 1: Fetch all interface statuses upfront for efficiency ---
+        all_statuses = db.query(ProjectInterfaceStatus).all()
+        status_map = {
+            (status.project_id, status.interface_name): status.status
+            for status in all_statuses
+        }
+        print(f"Loaded {len(status_map)} interface statuses.")
+
+        # Query for all tasks with upcoming deadlines
         tasks_to_alert = db.query(ProjectScheduleTask).options(
             joinedload(ProjectScheduleTask.responsible_users),
             joinedload(ProjectScheduleTask.project)
@@ -82,7 +90,7 @@ def check_deadlines_and_send_alerts():
 
         print(f"Found {len(tasks_to_alert)} tasks with upcoming deadlines.")
 
-        # --- MODIFIED LOGIC: 1. Group tasks by responsible user ---
+        # Group tasks by responsible user
         tasks_by_user = {}
         for task in tasks_to_alert:
             for user in task.responsible_users:
@@ -90,7 +98,7 @@ def check_deadlines_and_send_alerts():
                     tasks_by_user[user.id] = {'user_obj': user, 'tasks': []}
                 tasks_by_user[user.id]['tasks'].append(task)
 
-        # --- MODIFIED LOGIC: 2. Loop through users and send one summary email each ---
+        # Loop through users and send one summary email each
         for user_id, data in tasks_by_user.items():
             user = data['user_obj']
             tasks = data['tasks']
@@ -101,7 +109,7 @@ def check_deadlines_and_send_alerts():
 
             # Build the list of tasks for the email body
             task_list_html = ""
-            for task in sorted(tasks, key=lambda t: t.end_date): # Sort tasks by due date
+            for task in sorted(tasks, key=lambda t: t.end_date):
                 days_until_due = (task.end_date - today).days
                 if days_until_due == 0:
                     alert_type = "DUE TODAY"
@@ -110,10 +118,15 @@ def check_deadlines_and_send_alerts():
                 else:
                     alert_type = "Due in 2 Days"
 
+                # --- MODIFICATION 2: Look up the status and add it to the email ---
+                status_key = (task.project_id, task.interface_name)
+                interface_status = status_map.get(status_key, "Status Unknown")
+
                 task_list_html += f"""
                 <li style="margin-bottom: 15px; padding: 10px; border-left: 4px solid #f59e0b; background-color: #fef9c3;">
                     <strong>Project:</strong> {task.project.project_name}<br>
-                    <strong>Task:</strong> {task.task_name} (Interface: {task.interface_name.replace('_', ' ')})<br>
+                    <strong>Interface:</strong> {task.interface_name.replace('_', ' ')} (Status: {interface_status})<br>
+                    <strong>Task:</strong> {task.task_name}<br>
                     <strong>Due Date:</strong> {task.end_date.strftime('%A, %B %d, %Y')} <strong style="color: #b45309;">({alert_type})</strong>
                 </li>
                 """

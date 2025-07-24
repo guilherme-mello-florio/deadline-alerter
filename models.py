@@ -1,6 +1,6 @@
 # models.py (Corrected version for alerter)
 
-from sqlalchemy import Column, Integer, String, Date, Table, ForeignKey
+from sqlalchemy import Column, Integer, String, Date, DateTime, Table, ForeignKey
 from sqlalchemy.orm import relationship, declarative_base
 
 # Base class for all models
@@ -61,3 +61,10 @@ class ProjectScheduleTask(Base):
     )
     project = relationship("Project", back_populates="schedule_tasks")
     drop = relationship("ProjectDrop", back_populates="tasks")
+
+class ProjectInterfaceStatus(Base):
+    __tablename__ = 'project_interface_status'
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey('projects.id'), nullable=False)
+    interface_name = Column(String(255), nullable=False)
+    status = Column(String(50), nullable=False)

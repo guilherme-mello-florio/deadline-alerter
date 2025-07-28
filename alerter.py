@@ -125,7 +125,8 @@ def check_deadlines_and_send_alerts():
                 task_list_html += f"""
                 <li style="margin-bottom: 15px; padding: 10px; border-left: 4px solid #f59e0b; background-color: #fef9c3;">
                     <strong>Project:</strong> {task.project.project_name}<br>
-                    <strong>Interface:</strong> {task.interface_name.replace('_', ' ')} (Status: {interface_status})<br>
+                    <strong>Interface:</strong> {task.interface_name.replace('_', ' ')}<br>
+                    <strong>Status: {interface_status}<br>
                     <strong>Task:</strong> {task.task_name}<br>
                     <strong>Due Date:</strong> {task.end_date.strftime('%A, %B %d, %Y')} <strong style="color: #b45309;">({alert_type})</strong>
                 </li>
